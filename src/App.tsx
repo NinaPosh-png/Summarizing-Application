@@ -6,16 +6,14 @@ import {
   Loader2, 
   AlertCircle, 
   Trash2, 
-  Copy,
   Layers,
   Fingerprint,
   Zap,
   ArrowRight,
   Sparkles,
-  ClipboardCheck,
   RefreshCcw,
-  Webhook,
-  Globe
+  CheckCircle2,
+  Box
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import axios from "axios";
@@ -26,27 +24,18 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-interface SummaryResult {
-  fileName: string;
-  summary: string;
-  timestamp: string;
-  webhookStatus?: 'idle' | 'sending' | 'success' | 'failed';
-}
+type DispatchStatus = 'idle' | 'processing' | 'success' | 'error';
 
 export default function App() {
   const [file, setFile] = useState<File | null>(null);
-  const [isSummarizing, setIsSummarizing] = useState(false);
-  const [summaryResult, setSummaryResult] = useState<SummaryResult | null>(null);
+  const [status, setStatus] = useState<DispatchStatus>('idle');
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [webhookUrl, setWebhookUrl] = useState("");
-  const [webhookSecret, setWebhookSecret] = useState("");
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
       setFile(acceptedFiles[0]);
       setError(null);
-      setSummaryResult(null);
+      setStatus('idle');
     }
   }, []);
 
@@ -64,7 +53,7 @@ export default function App() {
 
   const clearFile = () => {
     setFile(null);
-    setSummaryResult(null);
+    setStatus('idle');
     setError(null);
   };
 
@@ -80,90 +69,42 @@ export default function App() {
     });
   };
 
-  const triggerWebhook = async (payload: any) => {
-    if (!webhookUrl) return;
-
-    setSummaryResult(prev => prev ? { ...prev, webhookStatus: 'sending' } : null);
-
-    try {
-      await axios.post("/api/trigger-webhook", {
-        url: webhookUrl,
-        data: payload,
-        secret: webhookSecret,
-      });
-      setSummaryResult(prev => prev ? { ...prev, webhookStatus: 'success' } : null);
-    } catch (err) {
-      console.error("Webhook failed:", err);
-      setSummaryResult(prev => prev ? { ...prev, webhookStatus: 'failed' } : null);
-    }
-  };
-
-  const handleSummarize = async () => {
+  const handleDispatch = async () => {
     if (!file) return;
 
-    setIsSummarizing(true);
+    setStatus('processing');
     setError(null);
 
     try {
       const base64Data = await fileToBase64(file);
       
-      const response = await axios.post("/api/summarize", {
+      await axios.post("/api/dispatch", {
         base64Data,
         mimeType: file.type || "application/pdf",
-        fileName: file.name
+        fileName: file.name,
+        fileSize: file.size
       });
 
-      const { summary, timestamp } = response.data;
-      
-      const result: SummaryResult = {
-        fileName: file.name,
-        summary,
-        timestamp,
-        webhookStatus: 'idle'
-      };
-
-      setSummaryResult(result);
-
-      // Trigger Webhook with File + Summary as requested
-      if (webhookUrl) {
-        await triggerWebhook({
-          event: "document_processed",
-          file: {
-            name: file.name,
-            type: file.type,
-            size: file.size,
-            data: base64Data // The ACTUAL file is sent to webhook
-          },
-          summary: summary,
-          timestamp: timestamp
-        });
-      }
+      setStatus('success');
     } catch (err: any) {
-      console.error("Analysis Error:", err);
-      setError(err.response?.data?.error || "Failed to process document. Please ensure it is a valid text-based file.");
-    } finally {
-      setIsSummarizing(false);
+      console.error("Dispatch Error:", err);
+      setError(err.response?.data?.error || "Failed to forward document. Please check server logs.");
+      setStatus('error');
     }
-  };
-
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
   };
 
   return (
     <div className="min-h-screen bg-bg text-text-main flex flex-col p-4 md:p-12">
       
       {/* Navigation */}
-      <nav className="max-w-5xl w-full mx-auto flex justify-between items-center mb-16">
+      <nav className="max-w-4xl w-full mx-auto flex justify-between items-center mb-16">
         <div className="flex items-center gap-4 group">
           <div className="w-12 h-12 bg-brand rounded-2xl flex items-center justify-center shadow-lg shadow-brand/20 group-hover:scale-110 transition-transform">
             <Layers className="text-white" size={24} />
           </div>
           <div>
-            <h1 className="text-xl font-black tracking-tight leading-none text-slate-900">EVERYTHING DOCUMENT</h1>
-            <p className="text-[10px] uppercase tracking-[0.2em] font-bold text-slate-400 mt-1">Intelligence Pipeline</p>
+            <h1 className="text-xl font-black tracking-tight leading-none text-slate-900 uppercase">Everything Document</h1>
+            <p className="text-[10px] uppercase tracking-[0.2em] font-bold text-slate-400 mt-1">Integration Gateway</p>
           </div>
         </div>
         <div className="hidden md:flex items-center gap-6">
@@ -171,35 +112,45 @@ export default function App() {
         </div>
       </nav>
 
-      <main className="max-w-5xl w-full mx-auto flex-1 grid grid-cols-1 lg:grid-cols-12 gap-8">
+      <main className="max-w-4xl w-full mx-auto flex-1 flex flex-col items-center">
         
-        <div className="lg:col-span-7 space-y-8">
+        {/* Simplified Site Heading */}
+        <div className="text-center mb-12 max-w-2xl px-4">
+          <h2 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tight mb-4">
+            Automated Document Integration.
+          </h2>
+          <p className="text-slate-500 font-medium leading-relaxed">
+            Securely upload and dispatch your documents directly into your automated processing workflows with zero friction.
+          </p>
+        </div>
+
+        <div className="w-full space-y-8">
           
           {/* Main Workzone */}
           <section className="panel-white overflow-hidden relative w-full">
             <div className="absolute top-0 right-0 p-8 opacity-5">
-              <Sparkles size={120} />
+              <Box size={120} />
             </div>
 
             <header className="mb-8 relative z-10 flex justify-between items-center">
               <div>
                 <span className="label-caps">Process</span>
-                <h2 className="text-2xl font-bold tracking-tight">Document Summary</h2>
+                <h2 className="text-2xl font-bold tracking-tight">Document Processing</h2>
               </div>
-              {summaryResult && (
+              {status === 'success' && (
                 <button 
                   onClick={clearFile}
-                  className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-red-500 transition-colors"
+                  className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-brand transition-colors"
                 >
                   <RefreshCcw size={14} />
-                  Reset
+                  New Upload
                 </button>
               )}
             </header>
 
             <div className="space-y-8 relative z-10">
               <AnimatePresence mode="wait">
-                {!file && !summaryResult ? (
+                {status !== 'success' && !file ? (
                   <motion.div 
                     key="uploader"
                     initial={{ opacity: 0, y: 10 }}
@@ -209,92 +160,89 @@ export default function App() {
                     <div 
                       {...getRootProps()} 
                       className={cn(
-                        "border-2 border-dashed rounded-[2.5rem] h-64 flex flex-col items-center justify-center text-center cursor-pointer transition-all",
+                        "border-2 border-dashed rounded-[2.5rem] h-80 flex flex-col items-center justify-center text-center cursor-pointer transition-all",
                         isDragActive ? "border-brand bg-brand-soft" : "border-slate-200 hover:border-brand/40 group bg-slate-50/50"
                       )}
                     >
                       <input {...getInputProps()} />
-                      <div className="w-16 h-16 bg-white rounded-2xl shadow-sm border border-slate-100 flex items-center justify-center mb-4 group-hover:-translate-y-2 transition-transform">
-                        <Upload size={28} className="text-brand" />
+                      <div className="w-20 h-20 bg-white rounded-3xl shadow-sm border border-slate-100 flex items-center justify-center mb-4 group-hover:-translate-y-2 transition-transform">
+                        <Upload size={32} className="text-brand" />
                       </div>
-                      <p className="font-bold text-slate-600 uppercase tracking-widest text-sm">Upload File</p>
-                      <p className="text-[10px] text-slate-400 mt-1 font-bold">PDF, DOCX, TXT</p>
+                      <p className="font-bold text-slate-600 uppercase tracking-widest">Select Document</p>
+                      <p className="text-xs text-slate-400 mt-1 font-bold italic">Ready for secure processing</p>
                     </div>
                   </motion.div>
-                ) : !summaryResult ? (
+                ) : status !== 'success' ? (
                   <motion.div 
                     key="file-ready"
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
                     className="space-y-8"
                   >
-                    <div className="p-6 rounded-[2rem] bg-slate-50 border border-slate-200 flex items-center justify-between">
+                    <div className="p-8 rounded-[2.5rem] bg-slate-50 border border-slate-200 flex items-center justify-between shadow-sm">
                       <div className="flex items-center gap-6">
-                        <div className="w-14 h-14 bg-white rounded-2xl shadow-sm flex items-center justify-center text-brand">
-                          <FileText size={28} />
+                        <div className="w-16 h-16 bg-white rounded-2xl shadow-sm flex items-center justify-center text-brand">
+                          <FileText size={32} />
                         </div>
                         <div>
-                          <p className="text-base font-bold text-slate-800 break-all">{file?.name}</p>
-                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                          <p className="text-lg font-bold text-slate-800 break-all">{file?.name}</p>
+                          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">
                             {file ? (file.size / 1024 / 1024).toFixed(2) : 0} MB • READY
                           </p>
                         </div>
                       </div>
                       <button 
                         onClick={clearFile}
-                        className="w-10 h-10 rounded-xl hover:bg-red-50 hover:text-red-500 transition-colors flex items-center justify-center text-slate-300"
+                        className="w-12 h-12 rounded-2xl hover:bg-red-50 hover:text-red-500 transition-colors flex items-center justify-center text-slate-300"
                       >
-                        <Trash2 size={20} />
+                        <Trash2 size={24} />
                       </button>
                     </div>
 
                     <button
-                      disabled={isSummarizing}
-                      onClick={handleSummarize}
-                      className="modern-btn w-full flex items-center justify-center gap-3 h-16 shadow-xl shadow-brand/10"
+                      disabled={status === 'processing'}
+                      onClick={handleDispatch}
+                      className="modern-btn w-full flex items-center justify-center gap-3 h-20 text-lg shadow-2xl shadow-brand/20 group"
                     >
-                      {isSummarizing ? (
+                      {status === 'processing' ? (
                         <>
-                          <Loader2 className="animate-spin" size={20} />
+                          <Loader2 className="animate-spin" size={24} />
                           <span>PROCESSING...</span>
                         </>
                       ) : (
                         <>
-                          <Zap size={20} />
-                          <span>SEND TO PIPELINE</span>
-                          <ArrowRight size={18} className="opacity-40" />
+                          <Zap size={22} className="group-hover:animate-pulse" />
+                          <span>UPLOAD AND PROCESS</span>
+                          <ArrowRight size={20} className="opacity-40" />
                         </>
                       )}
                     </button>
                   </motion.div>
                 ) : (
                   <motion.div 
-                    key="result"
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="space-y-8"
+                    key="success"
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="p-12 text-center space-y-6"
                   >
-                    <div className="flex items-center justify-between px-2">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full bg-brand" />
-                        <span className="text-xs font-bold text-brand uppercase tracking-[0.2em]">ANALYSIS COMPLETE</span>
-                      </div>
-                      <button 
-                        onClick={() => copyToClipboard(summaryResult.summary)}
-                        className={cn(
-                          "flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold uppercase transition-all",
-                          copied ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"
-                        )}
-                      >
-                        {copied ? <ClipboardCheck size={14} /> : <Copy size={14} />}
-                        {copied ? "Copied" : "Copy"}
-                      </button>
+                    <div className="inline-flex w-24 h-24 bg-emerald-50 text-emerald-500 rounded-full items-center justify-center mb-4">
+                      <CheckCircle2 size={48} />
                     </div>
-
-                    <div className="p-8 bg-slate-50 rounded-[2rem] border border-slate-200 relative overflow-hidden">
-                      <p className="text-lg font-medium leading-relaxed text-slate-700 relative z-10 whitespace-pre-wrap">
-                        {summaryResult.summary}
-                      </p>
+                    <div>
+                      <h3 className="text-3xl font-black text-slate-900 tracking-tight">Process Successful</h3>
+                      <p className="text-slate-400 font-bold uppercase tracking-[0.2em] text-[10px] mt-2 italic">Document dispatched for processing</p>
+                    </div>
+                    <div className="pt-4 flex flex-col items-center gap-2">
+                       <p className="text-sm font-medium text-slate-500 max-w-xs transition-colors">
+                        Your document has been securely received and forwarded to your automation gateway.
+                       </p>
+                       <button 
+                         onClick={clearFile}
+                         className="mt-6 px-8 py-4 bg-slate-900 text-white rounded-2xl font-bold uppercase tracking-widest text-xs hover:bg-brand transition-all flex items-center gap-3"
+                       >
+                         <RefreshCcw size={16} />
+                         New Dispatch
+                       </button>
                     </div>
                   </motion.div>
                 )}
@@ -308,94 +256,43 @@ export default function App() {
                 >
                   <AlertCircle className="text-rose-500 mt-1 shrink-0" size={20} />
                   <div>
-                    <h4 className="text-sm font-bold text-rose-800 uppercase tracking-wide">Analysis Failure</h4>
+                    <h4 className="text-sm font-bold text-rose-800 uppercase tracking-wide">Gateway Error</h4>
                     <p className="text-xs text-rose-600 mt-1 leading-relaxed font-medium">{error}</p>
                   </div>
                 </motion.div>
               )}
             </div>
           </section>
-        </div>
 
-        {/* Right Col: Webhook Config */}
-        <div className="lg:col-span-5 space-y-8">
-           <section className="panel-white flex flex-col h-full bg-white/50 backdrop-blur-md">
-            <header className="mb-8 flex justify-between items-center">
-              <div>
-                <span className="label-caps">Distribution</span>
-                <h2 className="text-xl font-bold tracking-tight">Post-Process Hook</h2>
-              </div>
-              <AnimatePresence>
-                {summaryResult?.webhookStatus && (
-                  <motion.div 
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0 }}
-                    className={cn(
-                      "px-2 py-1 rounded-md text-[9px] font-black uppercase ring-1 ring-inset",
-                      summaryResult.webhookStatus === 'sending' && "bg-brand/10 text-brand ring-brand/20",
-                      summaryResult.webhookStatus === 'success' && "bg-emerald-100 text-emerald-700 ring-emerald-200",
-                      summaryResult.webhookStatus === 'failed' && "bg-rose-100 text-rose-700 ring-rose-200",
-                      summaryResult.webhookStatus === 'idle' && "bg-slate-100 text-slate-500 ring-slate-200"
-                    )}
-                  >
-                    {summaryResult.webhookStatus}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </header>
-
-            <div className="space-y-6 flex-1">
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                  <Globe size={14} className="text-brand" />
-                  Target URL
-                </label>
-                <input 
-                  type="url"
-                  placeholder="https://your-system.com/webhook"
-                  className="modern-input w-full text-xs"
-                  value={webhookUrl}
-                  onChange={(e) => setWebhookUrl(e.target.value)}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                  <Fingerprint size={14} className="text-brand" />
-                  Secret Signature
-                </label>
-                <input 
-                  type="password"
-                  placeholder="X-EverythingDocument-Signature"
-                  className="modern-input w-full text-xs"
-                  value={webhookSecret}
-                  onChange={(e) => setWebhookSecret(e.target.value)}
-                />
-              </div>
-
-              <div className="mt-4 p-5 bg-slate-50 rounded-2xl border border-slate-100/50">
-                <div className="flex items-center gap-3 mb-2">
-                  <Webhook size={16} className={webhookUrl ? "text-brand" : "text-slate-300"} />
-                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Automation Logic</span>
+          {/* Tips Section */}
+          {status !== 'success' && status !== 'processing' && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {[
+                { title: "Direct", icon: Box, text: "Bypasses intermediary processing for speed." },
+                { title: "Encrypted", icon: Fingerprint, text: "Secure headers with signature validation." },
+                { title: "Automated", icon: Sparkles, text: "Perfect for n8n and Zapier pipelines." }
+              ].map((tip, i) => (
+                <div key={i} className="p-6 rounded-3xl bg-white/50 border border-slate-100 flex flex-col items-center text-center">
+                  <div className="w-10 h-10 bg-white rounded-xl shadow-sm border border-slate-100 flex items-center justify-center mb-3 text-brand text-opacity-80">
+                    <tip.icon size={18} />
+                  </div>
+                  <h4 className="text-xs font-black uppercase tracking-widest text-slate-800 mb-1">{tip.title}</h4>
+                  <p className="text-[10px] text-slate-400 font-medium leading-relaxed">{tip.text}</p>
                 </div>
-                <p className="text-[10px] text-slate-400 leading-relaxed font-medium">
-                  When a document is summarized, the full base64 file data and intelligence summary are securely dispatched to the target URL.
-                </p>
-              </div>
+              ))}
             </div>
-           </section>
+          )}
         </div>
       </main>
 
       {/* Footer */}
-      <footer className="max-w-5xl w-full mx-auto mt-12 py-8 border-t border-slate-100 flex justify-between items-center text-[10px] font-bold text-slate-300 uppercase tracking-[0.2em] select-none">
+      <footer className="max-w-4xl w-full mx-auto mt-12 py-8 border-t border-slate-100 flex justify-between items-center text-[10px] font-bold text-slate-300 uppercase tracking-[0.2em] select-none">
         <div className="flex items-center gap-6">
           <span>&copy; 2026 Everything Document</span>
         </div>
         <div className="flex items-center gap-3">
-          <div className="w-1.5 h-1.5 bg-brand rounded-full shadow-[0_0_8px_rgba(59,130,246,0.5)] animate-pulse" />
-          <span>v2.3.0 DISPATCH</span>
+          <div className="w-1.5 h-1.5 bg-brand rounded-full shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
+          <span>v3.0.0 N8N-ONLY</span>
         </div>
       </footer>
     </div>
