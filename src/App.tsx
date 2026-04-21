@@ -31,7 +31,6 @@ export default function App() {
   const [file, setFile] = useState<File | null>(null);
   const [status, setStatus] = useState<DispatchStatus>('idle');
   const [error, setError] = useState<string | null>(null);
-  const [userEmail, setUserEmail] = useState("mimie5015@gmail.com");
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
@@ -85,7 +84,6 @@ export default function App() {
         mimeType: file.type || "application/pdf",
         fileName: file.name,
         fileSize: file.size,
-        userId: userEmail,
         lastModified: new Date(file.lastModified).toISOString()
       });
 
@@ -153,23 +151,6 @@ export default function App() {
             </header>
 
             <div className="space-y-8 relative z-10">
-              {/* User Identity Section */}
-              <div className="bg-slate-50 p-6 rounded-[1.5rem] border border-slate-100 flex flex-col md:flex-row md:items-center gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-brand/10 flex items-center justify-center text-brand">
-                    <Mail size={18} />
-                  </div>
-                  <label className="text-xs font-black uppercase tracking-widest text-slate-500 shrink-0">Dispatcher ID</label>
-                </div>
-                <input 
-                  type="email" 
-                  value={userEmail}
-                  onChange={(e) => setUserEmail(e.target.value)}
-                  placeholder="Enter dispatcher email"
-                  className="bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium focus:ring-2 focus:ring-brand/20 outline-none w-full transition-all"
-                />
-              </div>
-
               <AnimatePresence mode="wait">
                 {status !== 'success' && !file ? (
                   <motion.div 
@@ -260,7 +241,7 @@ export default function App() {
                     </div>
                     <div className="pt-4 flex flex-col items-center gap-2">
                        <p className="text-sm font-medium text-slate-500 max-w-xs transition-colors">
-                        The document from <strong>{userEmail}</strong> has been securely received and forwarded to your automation gateway.
+                        The document has been securely received and forwarded to your automation gateway.
                        </p>
                        <button 
                          onClick={clearFile}

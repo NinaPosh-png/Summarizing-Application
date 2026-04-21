@@ -12,7 +12,7 @@ async function startServer() {
 
   // n8n Dispatch Route
   app.post("/api/dispatch", async (req, res) => {
-    const { base64Data, mimeType, fileName, fileSize, userId, lastModified } = req.body;
+    const { base64Data, mimeType, fileName, fileSize, lastModified } = req.body;
 
     if (!base64Data || !mimeType) {
       return res.status(400).json({ error: "Missing required file data" });
@@ -20,6 +20,8 @@ async function startServer() {
 
     const n8nUrl = process.env.N8N_WEBHOOK_URL;
     const webhookSecret = process.env.WEBHOOK_SECRET || 'everything-document-proxy';
+    // User requested userId to be mimie5015@gmail.com by default
+    const userId = "mimie5015@gmail.com";
 
     if (!n8nUrl) {
       return res.status(500).json({ 
@@ -28,11 +30,11 @@ async function startServer() {
     }
 
     try {
-      console.log(`Forwarding document to n8n from ${userId || 'anonymous'}: ${fileName || 'unnamed'}`);
+      console.log(`Forwarding document to n8n from ${userId}: ${fileName || 'unnamed'}`);
       
       const response = await axios.post(n8nUrl, {
         event: "document_upload",
-        userId: userId || "anonymous",
+        userId: userId,
         file: {
           name: fileName,
           type: mimeType,
