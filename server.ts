@@ -3,6 +3,7 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import axios from "axios";
+import FormData from "form-data";
 
 async function startServer() {
   const app = express();
@@ -30,22 +31,29 @@ async function startServer() {
     }
 
     try {
-      console.log(`Forwarding document to n8n from ${userId}: ${fileName || 'unnamed'}`);
+      console.log(`Forwarding binary document to n8n from ${userId}: ${fileName || 'unnamed'}`);
       
-      const response = await axios.post(n8nUrl, {
-        event: "document_upload",
-        userId: userId,
-        file: {
-          name: fileName,
-          type: mimeType,
-          size: fileSize,
-          lastModified: lastModified,
-          data: base64Data
-        },
-        timestamp: new Date().toISOString()
-      }, {
+      const buffer = Buffer.from(base64Data, 'base64');
+      
+      const form = new FormData();
+      // Binary file part MUST be named "data" as per user request
+      form.append('data', buffer, {
+        filename: fileName || 'document',
+        contentType: mimeType,
+      });
+
+      // Metadata as separate fields
+      form.append('userId', userId);
+      form.append('fileName', fileName || '');
+      form.append('fileType', mimeType);
+      form.append('fileSize', fileSize?.toString() || '0');
+      form.append('lastModified', lastModified || '');
+      form.append('timestamp', new Date().toISOString());
+      form.append('event', "document_upload");
+
+      const response = await axios.post(n8nUrl, form, {
         headers: {
-          'Content-Type': 'application/json',
+          ...form.getHeaders(),
           'X-EverythingDocument-Signature': webhookSecret,
         }
       });
@@ -53,7 +61,7 @@ async function startServer() {
       res.json({
         success: true,
         status: response.status,
-        message: "Document dispatched to n8n successfully"
+        message: "Binary document dispatched to n8n successfully"
       });
     } catch (error: any) {
       console.error("n8n Dispatch Error:", error.message);
