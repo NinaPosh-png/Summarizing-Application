@@ -21,10 +21,10 @@ import { motion, AnimatePresence } from "motion/react";
 import axios from "axios";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 
-// @ts-ignore - mammoth is loaded via CDN in index.html to ensure browser compatibility
+// @ts-ignore - mammoth and pdf-lib are loaded via CDN in index.html to ensure browser compatibility
 const mammoth = (window as any).mammoth;
+const { PDFDocument, StandardFonts, rgb } = (window as any).PDFLib || {};
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
