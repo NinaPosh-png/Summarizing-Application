@@ -14,27 +14,44 @@ import {
   RefreshCcw,
   CheckCircle2,
   Box,
-  Mail
+  Mail,
+  FileDown
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import axios from "axios";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import * as mammoth from "mammoth";
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-type DispatchStatus = 'idle' | 'processing' | 'success' | 'error';
+type DispatchStatus = 'idle' | 'processing' | 'converting' | 'success' | 'error';
 
 export default function App() {
-  const [file, setFile] = useState<File | null>(null);
+  const [file, setFile] = useState<{
+    native: File;
+    name: string;
+    type: string;
+    size: number;
+    lastModified: number;
+    isConverted?: boolean;
+  } | null>(null);
   const [status, setStatus] = useState<DispatchStatus>('idle');
   const [error, setError] = useState<string | null>(null);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
-      setFile(acceptedFiles[0]);
+      const nativeFile = acceptedFiles[0];
+      setFile({
+        native: nativeFile,
+        name: nativeFile.name,
+        type: nativeFile.type,
+        size: nativeFile.size,
+        lastModified: nativeFile.lastModified
+      });
       setError(null);
       setStatus('idle');
     }
@@ -61,16 +78,65 @@ export default function App() {
     setError(null);
   };
 
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => {
-        const base64String = (reader.result as string).split(',')[1];
-        resolve(base64String);
+  const convertWordToPdf = async (nativeFile: File): Promise<{ data: string; name: string; size: number }> => {
+    try {
+      const arrayBuffer = await nativeFile.arrayBuffer();
+      
+      // 1. Extract text from DOCX
+      const result = await mammoth.extractRawText({ arrayBuffer });
+      const text = result.value;
+
+      // 2. Create PDF
+      const pdfDoc = await PDFDocument.create();
+      const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+      
+      // Basic pagination logic
+      const lines = text.split('\n');
+      let page = pdfDoc.addPage();
+      const { width, height } = page.getSize();
+      const fontSize = 11;
+      const margin = 50;
+      let y = height - margin;
+
+      for (const line of lines) {
+        if (line.trim() === '') {
+          y -= fontSize;
+          continue;
+        }
+
+        // Handle text wrapping briefly
+        const textWidth = font.widthOfTextAtSize(line, fontSize);
+        if (y < margin) {
+          page = pdfDoc.addPage();
+          y = height - margin;
+        }
+
+        page.drawText(line, {
+          x: margin,
+          y,
+          size: fontSize,
+          font,
+          color: rgb(0.1, 0.1, 0.1),
+        });
+        
+        y -= fontSize * 1.4;
+      }
+
+      const pdfBytes = await pdfDoc.save();
+      const base64 = btoa(
+        new Uint8Array(pdfBytes)
+          .reduce((data, byte) => data + String.fromCharCode(byte), '')
+      );
+
+      return {
+        data: base64,
+        name: nativeFile.name.replace(/\.(docx|doc)$/i, '.pdf'),
+        size: pdfBytes.length
       };
-      reader.onerror = error => reject(error);
-    });
+    } catch (err) {
+      console.error("Conversion failed:", err);
+      throw new Error("Failed to convert Word document to PDF. Ensure it is a valid .docx file.");
+    }
   };
 
   const handleDispatch = async () => {
@@ -80,20 +146,46 @@ export default function App() {
     setError(null);
 
     try {
-      const base64Data = await fileToBase64(file);
+      let base64Data = "";
+      let finalName = file.name;
+      let finalType = file.type;
+      let finalSize = file.size;
+
+      // Check if conversion is needed
+      const isWord = file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || 
+                     file.type === 'application/msword' ||
+                     file.name.endsWith('.docx') || 
+                     file.name.endsWith('.doc');
+
+      if (isWord) {
+        setStatus('converting');
+        const converted = await convertWordToPdf(file.native);
+        base64Data = converted.data;
+        finalName = converted.name;
+        finalType = 'application/pdf';
+        finalSize = converted.size;
+      } else {
+        const reader = new FileReader();
+        base64Data = await new Promise((resolve, reject) => {
+          reader.readAsDataURL(file.native);
+          reader.onload = () => resolve((reader.result as string).split(',')[1]);
+          reader.onerror = reject;
+        });
+      }
       
+      setStatus('processing');
       await axios.post("/api/dispatch", {
         base64Data,
-        mimeType: file.type || "application/pdf",
-        fileName: file.name,
-        fileSize: file.size,
+        mimeType: finalType,
+        fileName: finalName,
+        fileSize: finalSize,
         lastModified: new Date(file.lastModified).toISOString()
       });
 
       setStatus('success');
     } catch (err: any) {
       console.error("Dispatch Error:", err);
-      setError(err.response?.data?.error || "Failed to forward document. Please check server logs.");
+      setError(err.response?.data?.error || err.message || "Failed to forward document. Please check server logs.");
       setStatus('error');
     }
   };
@@ -125,7 +217,7 @@ export default function App() {
             Automated Document Integration.
           </h2>
           <p className="text-slate-500 font-medium leading-relaxed">
-            Securely upload and dispatch your documents directly into your automated processing workflows with zero friction.
+            Securely upload and dispatch your documents. Word files are automatically converted to PDF for seamless processing.
           </p>
         </div>
 
@@ -174,7 +266,7 @@ export default function App() {
                         <Upload size={32} className="text-brand" />
                       </div>
                       <p className="font-bold text-slate-700 uppercase tracking-widest text-sm">Select Document</p>
-                      <p className="text-[10px] text-slate-400 mt-1 font-bold italic uppercase tracking-wider">Ready for secure processing</p>
+                      <p className="text-[10px] text-slate-400 mt-1 font-bold italic uppercase tracking-wider">PDF, DOCX, XLSX, CSV, TXT</p>
                     </div>
                   </motion.div>
                 ) : status !== 'success' ? (
@@ -198,6 +290,12 @@ export default function App() {
                             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-white py-0.5 px-2 rounded-md border border-slate-100 shadow-sm">
                               {file ? new Date(file.lastModified).toLocaleDateString() : ''}
                             </p>
+                            {(file?.name.endsWith('.docx') || file?.name.endsWith('.doc')) && (
+                              <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest bg-emerald-50 py-0.5 px-2 rounded-md border border-emerald-100 shadow-sm flex items-center gap-1">
+                                <Sparkles size={10} />
+                                Auto-PDF
+                              </p>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -210,14 +308,19 @@ export default function App() {
                     </div>
 
                     <button
-                      disabled={status === 'processing'}
+                      disabled={status === 'processing' || status === 'converting'}
                       onClick={handleDispatch}
                       className="modern-btn w-full flex items-center justify-center gap-3 h-20 text-lg shadow-2xl shadow-brand/20 group"
                     >
                       {status === 'processing' ? (
                         <>
                           <Loader2 className="animate-spin" size={24} />
-                          <span>PROCESSING...</span>
+                          <span>SENDING...</span>
+                        </>
+                      ) : status === 'converting' ? (
+                        <>
+                          <RefreshCcw className="animate-spin" size={24} />
+                          <span>CONVERTING TO PDF...</span>
                         </>
                       ) : (
                         <>
@@ -278,7 +381,7 @@ export default function App() {
           {status !== 'success' && status !== 'processing' && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {[
-                { title: "Identity", icon: Mail, text: "Payloads are tagged with your dispatcher email." },
+                { title: "Conversion", icon: FileDown, text: "Word (.docx) files are automatically converted to PDF." },
                 { title: "Metadata", icon: Box, text: "Includes file size, type, and modification dates." },
                 { title: "Security", icon: Fingerprint, text: "Encrypted headers with signature validation." }
               ].map((tip, i) => (
@@ -302,7 +405,7 @@ export default function App() {
         </div>
         <div className="flex items-center gap-3">
           <div className="w-1.5 h-1.5 bg-brand rounded-full shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
-          <span>v3.1.0 META-ENABLED</span>
+          <span>v3.2.0 PDF-CONVERTER ACTIVE</span>
         </div>
       </footer>
     </div>
