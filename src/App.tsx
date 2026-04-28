@@ -30,7 +30,7 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-type DispatchStatus = 'idle' | 'processing' | 'converting' | 'success' | 'error';
+type DispatchStatus = 'idle' | 'processing' | 'converting' | 'success' | 'chat_success' | 'error';
 
 export default function App() {
   const [file, setFile] = useState<{
@@ -41,6 +41,7 @@ export default function App() {
     lastModified: number;
     isConverted?: boolean;
   } | null>(null);
+  const [instructions, setInstructions] = useState<string>("");
   const [status, setStatus] = useState<DispatchStatus>('idle');
   const [error, setError] = useState<string | null>(null);
 
@@ -76,6 +77,7 @@ export default function App() {
 
   const clearFile = () => {
     setFile(null);
+    setInstructions("");
     setStatus('idle');
     setError(null);
   };
@@ -192,6 +194,60 @@ export default function App() {
     }
   };
 
+  const handleChat = async () => {
+    if (!file && !instructions) return;
+
+    setStatus('processing');
+    setError(null);
+
+    try {
+      let base64Data = null;
+      let finalName = file?.name || "none";
+      let finalType = file?.type || "none";
+      let finalSize = file?.size || 0;
+
+      if (file) {
+        const isWord = file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || 
+                       file.type === 'application/msword' ||
+                       file.name.endsWith('.docx') || 
+                       file.name.endsWith('.doc');
+
+        if (isWord) {
+          setStatus('converting');
+          const converted = await convertWordToPdf(file.native);
+          base64Data = converted.data;
+          finalName = converted.name;
+          finalType = 'application/pdf';
+          finalSize = converted.size;
+        } else {
+          const reader = new FileReader();
+          base64Data = await new Promise((resolve, reject) => {
+            reader.readAsDataURL(file.native);
+            reader.onload = () => resolve((reader.result as string).split(',')[1]);
+            reader.onerror = reject;
+          });
+        }
+      }
+      
+      setStatus('processing');
+      await axios.post("/api/chat", {
+        base64Data,
+        mimeType: finalType,
+        fileName: finalName,
+        fileSize: finalSize,
+        lastModified: file ? new Date(file.lastModified).toISOString() : new Date().toISOString(),
+        instructions: instructions
+      });
+
+      setStatus('chat_success');
+      setInstructions("");
+    } catch (err: any) {
+      console.error("Chat Error:", err);
+      setError(err.response?.data?.error || err.message || "Failed to forward instructions. Please check server logs.");
+      setStatus('error');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-bg text-text-main flex flex-col p-4 md:p-12 font-sans">
       
@@ -236,7 +292,7 @@ export default function App() {
                 <span className="label-caps">Process</span>
                 <h2 className="text-2xl font-bold tracking-tight">Document Processing</h2>
               </div>
-              {status === 'success' && (
+              {(status === 'success' || status === 'chat_success') && (
                 <button 
                   onClick={clearFile}
                   className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-brand transition-colors"
@@ -249,89 +305,127 @@ export default function App() {
 
             <div className="space-y-8 relative z-10">
               <AnimatePresence mode="wait">
-                {status !== 'success' && !file ? (
+                {status !== 'success' && status !== 'chat_success' ? (
                   <motion.div 
-                    key="uploader"
+                    key="active-zone"
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, scale: 0.95 }}
-                  >
-                    <div 
-                      {...getRootProps()} 
-                      className={cn(
-                        "border-2 border-dashed rounded-[2.5rem] h-72 flex flex-col items-center justify-center text-center cursor-pointer transition-all",
-                        isDragActive ? "border-brand bg-brand-soft" : "border-slate-200 hover:border-brand/40 group bg-slate-100/30"
-                      )}
-                    >
-                      <input {...getInputProps()} />
-                      <div className="w-20 h-20 bg-white rounded-3xl shadow-sm border border-slate-100 flex items-center justify-center mb-4 group-hover:-translate-y-2 transition-transform duration-300">
-                        <Upload size={32} className="text-brand" />
-                      </div>
-                      <p className="font-bold text-slate-700 uppercase tracking-widest text-sm">Select Document</p>
-                      <p className="text-[10px] text-slate-400 mt-1 font-bold italic uppercase tracking-wider">PDF, DOCX, XLSX, CSV, TXT</p>
-                    </div>
-                  </motion.div>
-                ) : status !== 'success' ? (
-                  <motion.div 
-                    key="file-ready"
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
                     className="space-y-8"
                   >
-                    <div className="p-8 rounded-[2.5rem] bg-slate-50 border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-6 shadow-sm">
-                      <div className="flex items-center gap-6">
-                        <div className="w-16 h-16 bg-white rounded-2xl shadow-sm flex items-center justify-center text-brand border border-slate-100">
-                          <FileText size={32} />
+                    {!file ? (
+                      <div 
+                        {...getRootProps()} 
+                        className={cn(
+                          "border-2 border-dashed rounded-[2.5rem] h-56 flex flex-col items-center justify-center text-center cursor-pointer transition-all",
+                          isDragActive ? "border-brand bg-brand-soft" : "border-slate-200 hover:border-brand/40 group bg-slate-100/30"
+                        )}
+                      >
+                        <input {...getInputProps()} />
+                        <div className="w-16 h-16 bg-white rounded-3xl shadow-sm border border-slate-100 flex items-center justify-center mb-4 group-hover:-translate-y-2 transition-transform duration-300">
+                          <Upload size={28} className="text-brand" />
                         </div>
-                        <div>
-                          <p className="text-lg font-bold text-slate-800 break-all">{file?.name}</p>
-                          <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
-                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-white py-0.5 px-2 rounded-md border border-slate-100 shadow-sm">
-                              {file ? (file.size / 1024 / 1024).toFixed(2) : 0} MB
-                            </p>
-                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-white py-0.5 px-2 rounded-md border border-slate-100 shadow-sm">
-                              {file ? new Date(file.lastModified).toLocaleDateString() : ''}
-                            </p>
-                            {(file?.name.endsWith('.docx') || file?.name.endsWith('.doc')) && (
-                              <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest bg-emerald-50 py-0.5 px-2 rounded-md border border-emerald-100 shadow-sm flex items-center gap-1">
-                                <Sparkles size={10} />
-                                Auto-PDF
+                        <p className="font-bold text-slate-700 uppercase tracking-widest text-xs">Attach Document (Optional)</p>
+                        <p className="text-[10px] text-slate-400 mt-1 font-bold italic uppercase tracking-wider">PDF, DOCX, XLSX, CSV, TXT</p>
+                      </div>
+                    ) : (
+                      <div className="p-8 rounded-[2.5rem] bg-slate-50 border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-6 shadow-sm">
+                        <div className="flex items-center gap-6">
+                          <div className="w-16 h-16 bg-white rounded-2xl shadow-sm flex items-center justify-center text-brand border border-slate-100">
+                            <FileText size={32} />
+                          </div>
+                          <div>
+                            <p className="text-lg font-bold text-slate-800 break-all">{file?.name}</p>
+                            <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-white py-0.5 px-2 rounded-md border border-slate-100 shadow-sm">
+                                {file ? (file.size / 1024 / 1024).toFixed(2) : 0} MB
                               </p>
-                            )}
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-white py-0.5 px-2 rounded-md border border-slate-100 shadow-sm">
+                                {file ? new Date(file.lastModified).toLocaleDateString() : ''}
+                              </p>
+                              {(file?.name.endsWith('.docx') || file?.name.endsWith('.doc')) && (
+                                <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest bg-emerald-50 py-0.5 px-2 rounded-md border border-emerald-100 shadow-sm flex items-center gap-1">
+                                  <Sparkles size={10} />
+                                  Auto-PDF
+                                </p>
+                              )}
+                            </div>
                           </div>
                         </div>
+                        <button 
+                          onClick={clearFile}
+                          className="w-12 h-12 rounded-2xl hover:bg-red-50 hover:text-red-500 transition-all flex items-center justify-center text-slate-300 border border-slate-200 hover:border-red-100"
+                        >
+                          <Trash2 size={24} />
+                        </button>
                       </div>
-                      <button 
-                        onClick={clearFile}
-                        className="w-12 h-12 rounded-2xl hover:bg-red-50 hover:text-red-500 transition-all flex items-center justify-center text-slate-300 border border-slate-200 hover:border-red-100"
-                      >
-                        <Trash2 size={24} />
-                      </button>
+                    )}
+
+                    {/* Persistent Instruction Space */}
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between px-4">
+                        <div className="flex items-center gap-2">
+                          <Mail size={16} className="text-slate-400" />
+                          <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Instructions & Chat</span>
+                        </div>
+                        <span className="text-[10px] bg-brand/10 text-brand px-2 py-1 rounded-full font-black uppercase tracking-[0.2em]">Contextual Mode</span>
+                      </div>
+                      <div className="relative group">
+                        <textarea
+                          value={instructions}
+                          onChange={(e) => setInstructions(e.target.value)}
+                          placeholder="What should happen next? (e.g. 'Summarize this file', 'Extract all dates', 'Rewrite as professional email')"
+                          className="w-full min-h-[160px] p-8 rounded-[2.5rem] bg-slate-100/50 border-2 border-transparent focus:border-brand/20 focus:bg-white focus:ring-0 transition-all outline-none text-slate-700 font-medium placeholder:text-slate-300 resize-none shadow-inner"
+                        />
+                        <div className="absolute bottom-6 right-6">
+                           <Sparkles size={24} className="text-brand/20 group-focus-within:text-brand transition-colors" />
+                        </div>
+                      </div>
                     </div>
 
-                    <button
-                      disabled={status === 'processing' || status === 'converting'}
-                      onClick={handleDispatch}
-                      className="modern-btn w-full flex items-center justify-center gap-3 h-20 text-lg shadow-2xl shadow-brand/20 group"
-                    >
-                      {status === 'processing' ? (
-                        <>
-                          <Loader2 className="animate-spin" size={24} />
-                          <span>SENDING...</span>
-                        </>
-                      ) : status === 'converting' ? (
-                        <>
-                          <RefreshCcw className="animate-spin" size={24} />
-                          <span>CONVERTING TO PDF...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Zap size={22} className="group-hover:animate-pulse" />
-                          <span>UPLOAD AND PROCESS</span>
-                          <ArrowRight size={20} className="opacity-40 group-hover:translate-x-1 transition-transform" />
-                        </>
-                      )}
-                    </button>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <button
+                        disabled={status === 'processing' || status === 'converting' || !file}
+                        onClick={handleDispatch}
+                        className="modern-btn w-full flex items-center justify-center gap-3 h-20 text-md shadow-2xl shadow-brand/20 group order-2 md:order-1 bg-slate-900 border-none disabled:opacity-20 disabled:cursor-not-allowed"
+                      >
+                        {status === 'processing' ? (
+                          <>
+                            <Loader2 className="animate-spin" size={24} />
+                            <span>SENDING...</span>
+                          </>
+                        ) : status === 'converting' ? (
+                          <>
+                            <RefreshCcw className="animate-spin" size={24} />
+                            <span>CONVERTING...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Zap size={22} className="opacity-60" />
+                            <span>UPLOAD DIRECT</span>
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        disabled={status === 'processing' || status === 'converting' || (!file && !instructions)}
+                        onClick={handleChat}
+                        className="modern-btn w-full flex items-center justify-center gap-3 h-20 text-md shadow-2xl shadow-brand/20 group order-1 md:order-2 disabled:opacity-20 disabled:cursor-not-allowed"
+                      >
+                        {status === 'processing' ? (
+                          <>
+                            <Loader2 className="animate-spin" size={24} />
+                            <span>CHATTING...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles size={22} className="group-hover:animate-pulse" />
+                            <span>CHAT WITH DOC</span>
+                            <ArrowRight size={20} className="hidden lg:block opacity-40 group-hover:translate-x-1 transition-transform" />
+                          </>
+                        )}
+                      </button>
+                    </div>
                   </motion.div>
                 ) : (
                   <motion.div 
@@ -344,19 +438,25 @@ export default function App() {
                       <CheckCircle2 size={48} />
                     </div>
                     <div>
-                      <h3 className="text-3xl font-black text-slate-900 tracking-tight">Process Successful</h3>
-                      <p className="text-slate-400 font-bold uppercase tracking-[0.2em] text-[10px] mt-2 italic">Document dispatched for processing</p>
+                      <h3 className="text-3xl font-black text-slate-900 tracking-tight">
+                        {status === 'chat_success' ? "Instructions Dispatched" : "Process Successful"}
+                      </h3>
+                      <p className="text-slate-400 font-bold uppercase tracking-[0.2em] text-[10px] mt-2 italic">
+                        {status === 'chat_success' ? "Chat gateway received context" : "Document dispatched for processing"}
+                      </p>
                     </div>
                     <div className="pt-4 flex flex-col items-center gap-2">
                        <p className="text-sm font-medium text-slate-500 max-w-xs transition-colors">
-                        The document has been securely received and forwarded to your automation gateway.
+                        {status === 'chat_success' 
+                          ? "Your instructions and document have been sent to the chat automation gateway for handling."
+                          : "The document has been securely received and forwarded to your automation gateway."}
                        </p>
                        <button 
                          onClick={clearFile}
                          className="mt-6 px-10 py-5 bg-slate-900 text-white rounded-2xl font-bold uppercase tracking-widest text-xs hover:bg-brand transition-all flex items-center gap-3 shadow-xl hover:-translate-y-1"
                        >
                          <RefreshCcw size={16} />
-                         New Dispatch
+                         New Upload
                        </button>
                     </div>
                   </motion.div>
