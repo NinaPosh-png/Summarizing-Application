@@ -30,7 +30,7 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-type DispatchStatus = 'idle' | 'processing' | 'converting' | 'success' | 'chat_success' | 'error';
+type DispatchStatus = 'idle' | 'processing' | 'converting' | 'success' | 'chatting' | 'chat_success' | 'error';
 
 export default function App() {
   const [file, setFile] = useState<{
@@ -147,6 +147,57 @@ export default function App() {
     }
   };
 
+  const handleDispatch = async () => {
+    if (!file) return;
+
+    setStatus('processing');
+    setError(null);
+
+    try {
+      let base64Data = "";
+      let finalName = file.name;
+      let finalType = file.type;
+      let finalSize = file.size;
+
+      // Check if conversion is needed
+      const isWord = file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || 
+                     file.type === 'application/msword' ||
+                     file.name.endsWith('.docx') || 
+                     file.name.endsWith('.doc');
+
+      if (isWord) {
+        setStatus('converting');
+        const converted = await convertWordToPdf(file.native);
+        base64Data = converted.data;
+        finalName = converted.name;
+        finalType = 'application/pdf';
+        finalSize = converted.size;
+      } else {
+        const reader = new FileReader();
+        base64Data = await new Promise((resolve, reject) => {
+          reader.readAsDataURL(file.native);
+          reader.onload = () => resolve((reader.result as string).split(',')[1]);
+          reader.onerror = reject;
+        });
+      }
+      
+      setStatus('processing');
+      await axios.post("/api/dispatch", {
+        base64Data,
+        mimeType: finalType,
+        fileName: finalName,
+        fileSize: finalSize,
+        lastModified: new Date(file.lastModified).toISOString()
+      });
+
+      setStatus('success');
+    } catch (err: any) {
+      console.error("Dispatch Error:", err);
+      setError(err.response?.data?.error || err.message || "Failed to forward document. Please check server logs.");
+      setStatus('error');
+    }
+  };
+
   const handleChat = async () => {
     if (!file && !instructions) return;
 
@@ -243,7 +294,7 @@ export default function App() {
             <header className="mb-8 relative z-10 flex justify-between items-center">
               <div>
                 <span className="label-caps">Process</span>
-                <h2 className="text-2xl font-bold tracking-tight text-brand">V2: Upload Document & Chat</h2>
+                <h2 className="text-2xl font-bold tracking-tight">Document Processing</h2>
               </div>
               {(status === 'success' || status === 'chat_success') && (
                 <button 
@@ -258,15 +309,14 @@ export default function App() {
 
             <div className="space-y-8 relative z-10">
               <AnimatePresence mode="wait">
-                {status !== 'success' && status !== 'chat_success' ? (
+                {status === 'idle' || status === 'processing' || status === 'converting' ? (
                   <motion.div 
-                    key="active-zone"
+                    key="upload-zone"
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, scale: 0.95 }}
                     className="space-y-8"
                   >
-                    {/* Main Interaction Area */}
                     {!file ? (
                       <div 
                         {...getRootProps()} 
@@ -294,77 +344,104 @@ export default function App() {
                               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-white py-0.5 px-2 rounded-md border border-slate-100 shadow-sm">
                                 {file ? (file.size / 1024 / 1024).toFixed(2) : 0} MB
                               </p>
-                              {(file?.name.endsWith('.docx') || file?.name.endsWith('.doc')) && (
-                                <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest bg-emerald-50 py-0.5 px-2 rounded-md border border-emerald-100 shadow-sm flex items-center gap-1">
-                                  <Sparkles size={10} />
-                                  Ready to Convert
-                                </p>
-                              )}
                             </div>
                           </div>
                         </div>
                         <button 
                           onClick={clearFile}
                           className="w-12 h-12 rounded-2xl hover:bg-red-50 hover:text-red-500 transition-all flex items-center justify-center text-slate-300 border border-slate-200 hover:border-red-100"
-                          title="Remove File"
                         >
                           <Trash2 size={24} />
                         </button>
                       </div>
                     )}
 
-                    {/* Chat & Instruction Space */}
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-between px-4">
-                        <div className="flex items-center gap-2">
-                          <Mail size={16} className="text-brand" />
-                          <span className="text-[10px] font-black uppercase tracking-widest text-slate-600">Chat with Document</span>
-                        </div>
-                        {file && (
-                          <span className="text-[10px] bg-emerald-100 text-emerald-600 px-2 py-1 rounded-full font-black uppercase tracking-[0.2em] animate-pulse">Context Active</span>
-                        )}
-                      </div>
-                      <div className="relative group">
-                        <textarea
-                          id="chat-input"
-                          value={instructions}
-                          onChange={(e) => setInstructions(e.target.value)}
-                          placeholder={file ? "Ask something about this document... (e.g. 'Summarize this', 'Check for errors')" : "Upload a document to start chatting, or type instructions here..."}
-                          className="w-full min-h-[200px] p-8 rounded-[2.5rem] bg-slate-100/50 border-2 border-transparent focus:border-brand/40 focus:bg-white focus:ring-4 focus:ring-brand/5 transition-all outline-none text-slate-700 font-medium placeholder:text-slate-300 resize-none shadow-inner"
-                        />
-                        <div className="absolute bottom-8 right-8">
-                           <Sparkles size={28} className={cn("transition-colors duration-500", instructions ? "text-brand" : "text-slate-200")} />
-                        </div>
-                      </div>
-                    </div>
-
                     <div className="w-full">
                       <button
-                        disabled={status === 'processing' || status === 'converting' || (!file && !instructions)}
-                        onClick={handleChat}
-                        className="modern-btn w-full flex items-center justify-center gap-3 h-24 text-xl shadow-2xl shadow-brand/30 group bg-slate-900 border-none disabled:opacity-20 disabled:grayscale disabled:cursor-not-allowed"
+                        disabled={status === 'processing' || status === 'converting' || !file}
+                        onClick={handleDispatch}
+                        className="modern-btn w-full flex items-center justify-center gap-3 h-24 text-xl shadow-2xl shadow-brand/30 group bg-slate-900 border-none disabled:opacity-20 disabled:cursor-not-allowed"
                       >
                         {status === 'processing' ? (
                           <>
                             <Loader2 className="animate-spin" size={28} />
-                            <span>PROCESSING REQUEST...</span>
+                            <span>SUBMITTING...</span>
                           </>
                         ) : status === 'converting' ? (
                           <>
                             <RefreshCcw className="animate-spin" size={28} />
-                            <span>CONVERTING DOCUMENT...</span>
+                            <span>CONVERTING...</span>
                           </>
                         ) : (
                           <>
-                            <Sparkles size={24} className={cn(instructions ? "animate-pulse text-brand" : "text-white/40")} />
-                            <span className="tracking-tight">UPLOAD</span>
+                            <Zap size={24} className={cn(file ? "text-brand animate-pulse" : "text-white/40")} />
+                            <span>SEND FOR PROCESSING</span>
                             <ArrowRight size={22} className="opacity-40 group-hover:translate-x-2 transition-transform" />
                           </>
                         )}
                       </button>
                     </div>
                   </motion.div>
-                ) : (
+                ) : status === 'chatting' ? (
+                  <motion.div 
+                    key="chat-zone"
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    className="space-y-8"
+                  >
+                    <div className="flex items-center justify-between bg-slate-50 p-4 rounded-3xl border border-slate-100">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-brand">
+                          <FileText size={20} />
+                        </div>
+                        <span className="text-xs font-bold text-slate-600 truncate max-w-[200px]">{file?.name}</span>
+                      </div>
+                      <span className="text-[10px] bg-emerald-100 text-emerald-600 px-3 py-1 rounded-full font-black uppercase tracking-widest">Active Context</span>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-2 px-4 text-brand">
+                        <Mail size={16} />
+                        <span className="text-[10px] font-black uppercase tracking-widest">Message Documentation</span>
+                      </div>
+                      <div className="relative group">
+                        <textarea
+                          id="chat-input"
+                          autoFocus
+                          value={instructions}
+                          onChange={(e) => setInstructions(e.target.value)}
+                          placeholder="What would you like to do with this document? (e.g. 'Summarize key points', 'Extract dates')"
+                          className="w-full min-h-[220px] p-8 rounded-[2.5rem] bg-white border-2 border-slate-100 focus:border-brand/40 focus:ring-4 focus:ring-brand/5 transition-all outline-none text-slate-700 font-medium placeholder:text-slate-300 resize-none"
+                        />
+                         <div className="absolute bottom-8 right-8">
+                           <Sparkles size={28} className={cn("transition-colors duration-500", instructions ? "text-brand" : "text-slate-100")} />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="w-full">
+                      <button
+                        disabled={status === 'processing' || !instructions}
+                        onClick={handleChat}
+                        className="modern-btn w-full flex items-center justify-center gap-3 h-20 text-md shadow-2xl shadow-brand/30 group bg-slate-900 border-none disabled:opacity-20"
+                      >
+                        {status === 'processing' ? (
+                          <>
+                            <Loader2 className="animate-spin" size={24} />
+                            <span>SENDING MESSAGE...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles size={22} className={instructions ? "animate-pulse text-brand" : ""} />
+                            <span>SEND TO AUTOMATION</span>
+                            <ArrowRight size={20} className="hidden lg:block opacity-40 group-hover:translate-x-2 transition-transform" />
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </motion.div>
+                ) : ( (status === 'success' || status === 'chat_success') && (
                   <motion.div 
                     key="success"
                     initial={{ opacity: 0, scale: 0.95 }}
@@ -376,26 +453,47 @@ export default function App() {
                     </div>
                     <div>
                       <h3 className="text-3xl font-black text-slate-900 tracking-tight">
-                        Instructions Sent
+                        {status === 'chat_success' ? "Instructions Sent" : "Process Successful"}
                       </h3>
                       <p className="text-slate-400 font-bold uppercase tracking-[0.2em] text-[10px] mt-2 italic">
-                        Message & Context received by gateway
+                        {status === 'chat_success' ? "Message & Context received by gateway" : "Document dispatched for processing"}
                       </p>
                     </div>
                     <div className="pt-4 flex flex-col items-center gap-2">
                        <p className="text-sm font-medium text-slate-500 max-w-xs transition-colors text-center">
-                        Your request has been securely forwarded to the automation gateway for processing.
+                        {status === 'chat_success' 
+                          ? "Your instructions and document have been sent to the chat automation gateway for handling."
+                          : "The document has been securely received and forwarded to your automation gateway."}
                        </p>
-                       <button 
-                         onClick={clearFile}
-                         className="mt-6 px-10 py-5 bg-slate-900 text-white rounded-2xl font-bold uppercase tracking-widest text-xs hover:bg-brand transition-all flex items-center gap-3 shadow-xl hover:-translate-y-1"
-                       >
-                         <RefreshCcw size={16} />
-                         New Message
-                       </button>
+                       
+                       {status === 'success' ? (
+                         <div className="flex flex-col gap-3 w-full mt-6">
+                           <button 
+                             onClick={() => setStatus('chatting')}
+                             className="px-10 py-5 bg-brand text-white rounded-2xl font-bold uppercase tracking-widest text-xs hover:bg-brand/90 transition-all flex items-center justify-center gap-3 shadow-xl hover:-translate-y-1"
+                           >
+                             <Sparkles size={16} />
+                             Proceed to Chat
+                           </button>
+                           <button 
+                             onClick={clearFile}
+                             className="text-[10px] font-bold text-slate-400 uppercase tracking-widest hover:text-slate-600 transition-colors"
+                           >
+                             Or Upload Another
+                           </button>
+                         </div>
+                       ) : (
+                         <button 
+                           onClick={clearFile}
+                           className="mt-6 px-10 py-5 bg-slate-900 text-white rounded-2xl font-bold uppercase tracking-widest text-xs hover:bg-brand transition-all flex items-center gap-3 shadow-xl hover:-translate-y-1"
+                         >
+                           <RefreshCcw size={16} />
+                           New Message
+                         </button>
+                       )}
                     </div>
                   </motion.div>
-                )}
+                ))}
               </AnimatePresence>
 
               {error && (
