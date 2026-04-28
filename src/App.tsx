@@ -57,6 +57,10 @@ export default function App() {
       });
       setError(null);
       setStatus('idle');
+      // Set focus to textarea after a short delay for transition
+      setTimeout(() => {
+        document.getElementById('chat-input')?.focus();
+      }, 100);
     }
   }, []);
 
@@ -140,57 +144,6 @@ export default function App() {
     } catch (err) {
       console.error("Conversion failed:", err);
       throw new Error("Failed to convert Word document to PDF. Ensure it is a valid .docx file.");
-    }
-  };
-
-  const handleDispatch = async () => {
-    if (!file) return;
-
-    setStatus('processing');
-    setError(null);
-
-    try {
-      let base64Data = "";
-      let finalName = file.name;
-      let finalType = file.type;
-      let finalSize = file.size;
-
-      // Check if conversion is needed
-      const isWord = file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || 
-                     file.type === 'application/msword' ||
-                     file.name.endsWith('.docx') || 
-                     file.name.endsWith('.doc');
-
-      if (isWord) {
-        setStatus('converting');
-        const converted = await convertWordToPdf(file.native);
-        base64Data = converted.data;
-        finalName = converted.name;
-        finalType = 'application/pdf';
-        finalSize = converted.size;
-      } else {
-        const reader = new FileReader();
-        base64Data = await new Promise((resolve, reject) => {
-          reader.readAsDataURL(file.native);
-          reader.onload = () => resolve((reader.result as string).split(',')[1]);
-          reader.onerror = reject;
-        });
-      }
-      
-      setStatus('processing');
-      await axios.post("/api/dispatch", {
-        base64Data,
-        mimeType: finalType,
-        fileName: finalName,
-        fileSize: finalSize,
-        lastModified: new Date(file.lastModified).toISOString()
-      });
-
-      setStatus('success');
-    } catch (err: any) {
-      console.error("Dispatch Error:", err);
-      setError(err.response?.data?.error || err.message || "Failed to forward document. Please check server logs.");
-      setStatus('error');
     }
   };
 
@@ -313,6 +266,7 @@ export default function App() {
                     exit={{ opacity: 0, scale: 0.95 }}
                     className="space-y-8"
                   >
+                    {/* Main Interaction Area */}
                     {!file ? (
                       <div 
                         {...getRootProps()} 
@@ -325,13 +279,13 @@ export default function App() {
                         <div className="w-16 h-16 bg-white rounded-3xl shadow-sm border border-slate-100 flex items-center justify-center mb-4 group-hover:-translate-y-2 transition-transform duration-300">
                           <Upload size={28} className="text-brand" />
                         </div>
-                        <p className="font-bold text-slate-700 uppercase tracking-widest text-xs">Attach Document (Optional)</p>
+                        <p className="font-bold text-slate-700 uppercase tracking-widest text-xs">Start by Attaching a Document</p>
                         <p className="text-[10px] text-slate-400 mt-1 font-bold italic uppercase tracking-wider">PDF, DOCX, XLSX, CSV, TXT</p>
                       </div>
                     ) : (
                       <div className="p-8 rounded-[2.5rem] bg-slate-50 border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-6 shadow-sm">
                         <div className="flex items-center gap-6">
-                          <div className="w-16 h-16 bg-white rounded-2xl shadow-sm flex items-center justify-center text-brand border border-slate-100">
+                          <div className="w-16 h-16 bg-white rounded-2xl shadow-sm flex items-center justify-center text-brand border border-slate-100 shadow-xl shadow-brand/10">
                             <FileText size={32} />
                           </div>
                           <div>
@@ -340,13 +294,10 @@ export default function App() {
                               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-white py-0.5 px-2 rounded-md border border-slate-100 shadow-sm">
                                 {file ? (file.size / 1024 / 1024).toFixed(2) : 0} MB
                               </p>
-                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-white py-0.5 px-2 rounded-md border border-slate-100 shadow-sm">
-                                {file ? new Date(file.lastModified).toLocaleDateString() : ''}
-                              </p>
                               {(file?.name.endsWith('.docx') || file?.name.endsWith('.doc')) && (
                                 <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest bg-emerald-50 py-0.5 px-2 rounded-md border border-emerald-100 shadow-sm flex items-center gap-1">
                                   <Sparkles size={10} />
-                                  Auto-PDF
+                                  Ready to Convert
                                 </p>
                               )}
                             </div>
@@ -355,73 +306,59 @@ export default function App() {
                         <button 
                           onClick={clearFile}
                           className="w-12 h-12 rounded-2xl hover:bg-red-50 hover:text-red-500 transition-all flex items-center justify-center text-slate-300 border border-slate-200 hover:border-red-100"
+                          title="Remove File"
                         >
                           <Trash2 size={24} />
                         </button>
                       </div>
                     )}
 
-                    {/* Persistent Instruction Space */}
+                    {/* Chat & Instruction Space */}
                     <div className="space-y-4">
                       <div className="flex items-center justify-between px-4">
                         <div className="flex items-center gap-2">
-                          <Mail size={16} className="text-slate-400" />
-                          <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Instructions & Chat</span>
+                          <Mail size={16} className="text-brand" />
+                          <span className="text-[10px] font-black uppercase tracking-widest text-slate-600">Chat with Document</span>
                         </div>
-                        <span className="text-[10px] bg-brand/10 text-brand px-2 py-1 rounded-full font-black uppercase tracking-[0.2em]">Contextual Mode</span>
+                        {file && (
+                          <span className="text-[10px] bg-emerald-100 text-emerald-600 px-2 py-1 rounded-full font-black uppercase tracking-[0.2em] animate-pulse">Context Active</span>
+                        )}
                       </div>
                       <div className="relative group">
                         <textarea
+                          id="chat-input"
                           value={instructions}
                           onChange={(e) => setInstructions(e.target.value)}
-                          placeholder="What should happen next? (e.g. 'Summarize this file', 'Extract all dates', 'Rewrite as professional email')"
-                          className="w-full min-h-[160px] p-8 rounded-[2.5rem] bg-slate-100/50 border-2 border-transparent focus:border-brand/20 focus:bg-white focus:ring-0 transition-all outline-none text-slate-700 font-medium placeholder:text-slate-300 resize-none shadow-inner"
+                          placeholder={file ? "Ask something about this document... (e.g. 'Summarize this', 'Check for errors')" : "Upload a document to start chatting, or type instructions here..."}
+                          className="w-full min-h-[200px] p-8 rounded-[2.5rem] bg-slate-100/50 border-2 border-transparent focus:border-brand/40 focus:bg-white focus:ring-4 focus:ring-brand/5 transition-all outline-none text-slate-700 font-medium placeholder:text-slate-300 resize-none shadow-inner"
                         />
-                        <div className="absolute bottom-6 right-6">
-                           <Sparkles size={24} className="text-brand/20 group-focus-within:text-brand transition-colors" />
+                        <div className="absolute bottom-8 right-8">
+                           <Sparkles size={28} className={cn("transition-colors duration-500", instructions ? "text-brand" : "text-slate-200")} />
                         </div>
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <button
-                        disabled={status === 'processing' || status === 'converting' || !file}
-                        onClick={handleDispatch}
-                        className="modern-btn w-full flex items-center justify-center gap-3 h-20 text-md shadow-2xl shadow-brand/20 group order-2 md:order-1 bg-slate-900 border-none disabled:opacity-20 disabled:cursor-not-allowed"
-                      >
-                        {status === 'processing' ? (
-                          <>
-                            <Loader2 className="animate-spin" size={24} />
-                            <span>SENDING...</span>
-                          </>
-                        ) : status === 'converting' ? (
-                          <>
-                            <RefreshCcw className="animate-spin" size={24} />
-                            <span>CONVERTING...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Zap size={22} className="opacity-60" />
-                            <span>UPLOAD DIRECT</span>
-                          </>
-                        )}
-                      </button>
-
+                    <div className="w-full">
                       <button
                         disabled={status === 'processing' || status === 'converting' || (!file && !instructions)}
                         onClick={handleChat}
-                        className="modern-btn w-full flex items-center justify-center gap-3 h-20 text-md shadow-2xl shadow-brand/20 group order-1 md:order-2 disabled:opacity-20 disabled:cursor-not-allowed"
+                        className="modern-btn w-full flex items-center justify-center gap-3 h-24 text-xl shadow-2xl shadow-brand/30 group bg-slate-900 border-none disabled:opacity-20 disabled:grayscale disabled:cursor-not-allowed"
                       >
                         {status === 'processing' ? (
                           <>
-                            <Loader2 className="animate-spin" size={24} />
-                            <span>CHATTING...</span>
+                            <Loader2 className="animate-spin" size={28} />
+                            <span>PROCESSING REQUEST...</span>
+                          </>
+                        ) : status === 'converting' ? (
+                          <>
+                            <RefreshCcw className="animate-spin" size={28} />
+                            <span>CONVERTING DOCUMENT...</span>
                           </>
                         ) : (
                           <>
-                            <Sparkles size={22} className="group-hover:animate-pulse" />
-                            <span>CHAT WITH DOC</span>
-                            <ArrowRight size={20} className="hidden lg:block opacity-40 group-hover:translate-x-1 transition-transform" />
+                            <Sparkles size={24} className={cn(instructions ? "animate-pulse text-brand" : "text-white/40")} />
+                            <span className="tracking-tight">UPLOAD</span>
+                            <ArrowRight size={22} className="opacity-40 group-hover:translate-x-2 transition-transform" />
                           </>
                         )}
                       </button>
@@ -439,24 +376,22 @@ export default function App() {
                     </div>
                     <div>
                       <h3 className="text-3xl font-black text-slate-900 tracking-tight">
-                        {status === 'chat_success' ? "Instructions Dispatched" : "Process Successful"}
+                        Instructions Sent
                       </h3>
                       <p className="text-slate-400 font-bold uppercase tracking-[0.2em] text-[10px] mt-2 italic">
-                        {status === 'chat_success' ? "Chat gateway received context" : "Document dispatched for processing"}
+                        Message & Context received by gateway
                       </p>
                     </div>
                     <div className="pt-4 flex flex-col items-center gap-2">
-                       <p className="text-sm font-medium text-slate-500 max-w-xs transition-colors">
-                        {status === 'chat_success' 
-                          ? "Your instructions and document have been sent to the chat automation gateway for handling."
-                          : "The document has been securely received and forwarded to your automation gateway."}
+                       <p className="text-sm font-medium text-slate-500 max-w-xs transition-colors text-center">
+                        Your request has been securely forwarded to the automation gateway for processing.
                        </p>
                        <button 
                          onClick={clearFile}
                          className="mt-6 px-10 py-5 bg-slate-900 text-white rounded-2xl font-bold uppercase tracking-widest text-xs hover:bg-brand transition-all flex items-center gap-3 shadow-xl hover:-translate-y-1"
                        >
                          <RefreshCcw size={16} />
-                         New Upload
+                         New Message
                        </button>
                     </div>
                   </motion.div>
